@@ -1,10 +1,11 @@
-
 import os
 import shutil
 import random
 import string
 import pyminizip
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     MessageHandler,
@@ -26,24 +27,25 @@ contador_archivos = {}
 archivos_listos_mostrado = {}
 
 # Base
-BASE_DIR = r"G:\Mi unidad\LoliVideos"
+BASE_DIR = "archivos_bot"
 os.makedirs(BASE_DIR, exist_ok=True)
 
 # Utilidad: generar contraseña aleatoria
 def generar_password(longitud=10):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=longitud))
 
-# Comando /start
+# Comando /start (ACTUALIZADO)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "*LoliBot*\n\n"
-        "1️⃣ *Escribe un nombre* para tu archivo ZIP (por ejemplo: `maria videos`)\n"
+    mensaje = (
+        "👋 ¡Hola! Bienvenido a *LoliBot*.\n\n"
+        "📦 Sigue estos pasos para comenzar:\n\n"
+        "1️⃣ *Escribe un nombre para tu archivo ZIP* (por ejemplo: `maria videos`)\n"
         "2️⃣ *Envía las fotos o videos* que quieras guardar.\n"
         "3️⃣ Cuando termines, pulsa el botón ✅ *Terminar y enviar* para subir el ZIP.\n\n"
-        "♻️ Puedes reiniciar con el botón *Reiniciar*, o cancelar con *Cancelar*."
-        "♻️ No uses un nombre que contenga la palabra años, usa years o y.",
-        parse_mode="Markdown"
+        "♻️ Puedes reiniciar con el botón *Reiniciar*, o cancelar con *Cancelar*.♻️\n\n"
+        "⚠️ *No uses un nombre que contenga la palabra 'años'*, usa `years` o `y` en su lugar."
     )
+    await update.message.reply_text(mensaje, parse_mode=ParseMode.MARKDOWN)
 
 # Asignar nombre
 async def guardar_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -57,7 +59,6 @@ async def guardar_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contador_archivos[user_id] = 0
     archivos_listos_mostrado[user_id] = False
 
-    # Botones CORREGIDOS
     keyboard = [
         [InlineKeyboardButton("✅ Terminar y enviar", callback_data="terminar_envio")],
         [
@@ -68,11 +69,10 @@ async def guardar_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-    f"""📋 Nombre asignado: *{nombre}*\nAhora envía las fotos o videos.""",
-    parse_mode="Markdown",
-    reply_markup=reply_markup
+        f"📋 Nombre asignado: *{nombre}*\nAhora envía las fotos o videos.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
     )
-
 
 # Subida de archivo
 async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84,7 +84,6 @@ async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     carpeta = archivos_temp[user_id]
 
-    # Tipo de archivo
     if update.message.photo:
         file = await update.message.photo[-1].get_file()
         ext = ".jpg"
@@ -94,13 +93,11 @@ async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         return
 
-    # Guardar archivo
     contador_archivos[user_id] += 1
     archivo_nombre = f"{contador_archivos[user_id]}{ext}"
     ruta = os.path.join(carpeta, archivo_nombre)
     await file.download_to_drive(ruta)
 
-    # Actualizar contador de subida
     texto_estado = f"📤 Subiendo archivos ({contador_archivos[user_id]})"
     if user_id in mensajes_estado:
         try:
@@ -110,12 +107,11 @@ async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         mensajes_estado[user_id] = await update.message.reply_text(texto_estado)
 
-    # Mostrar "Archivos listos" solo una vez
     if not archivos_listos_mostrado[user_id]:
         archivos_listos_mostrado[user_id] = True
         await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Archivos listos")
 
-# Botón de terminar/cancelar/reiniciar
+# Botón de acciones
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
@@ -128,7 +124,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cancelar":
         await comando_cancelar(query, context)
 
-# Función auxiliar para reiniciar desde botón
 async def comando_reiniciar(query, context):
     user_id = query.from_user.id
     if user_id in archivos_temp:
@@ -140,18 +135,9 @@ async def comando_reiniciar(query, context):
     archivos_listos_mostrado.pop(user_id, None)
     await query.edit_message_text("♻️ Se reinició el proceso.")
 
-# Función auxiliar para cancelar desde botón
 async def comando_cancelar(query, context):
     await comando_reiniciar(query, context)
     await query.edit_message_text("❌ Proceso cancelado.")
-    # Comando /reiniciar
-async def reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await comando_reiniciar(update, context)
-
-# Comando /cancelar
-async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await comando_cancelar(update, context)
-
 
 # Comando /terminar
 async def terminar(update: Update, context: ContextTypes.DEFAULT_TYPE, triggered_by_button=False):
@@ -184,8 +170,7 @@ async def terminar(update: Update, context: ContextTypes.DEFAULT_TYPE, triggered
         chat_id=ADMIN_CHAT_ID,
         document=open(ruta_zip, 'rb'),
         caption=f"📦 ZIP de {user.first_name}:\n`{nombre_zip}.zip`\n🔑 Contraseña: `{password}`",
-parse_mode="Markdown"
-
+        parse_mode=ParseMode.MARKDOWN
     )
 
     confirm = "📬 Tus archivos fueron enviados con contraseña. ¡Gracias!"
@@ -194,7 +179,6 @@ parse_mode="Markdown"
     else:
         await update.message.reply_text(confirm)
 
-    # Limpiar
     shutil.rmtree(carpeta)
     os.remove(ruta_zip)
     nombres_zip.pop(user_id)
@@ -202,6 +186,13 @@ parse_mode="Markdown"
     mensajes_estado.pop(user_id, None)
     contador_archivos.pop(user_id, None)
     archivos_listos_mostrado.pop(user_id, None)
+
+# Comandos directos /cancelar /reiniciar
+async def reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await comando_reiniciar(update, context)
+
+async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await comando_cancelar(update, context)
 
 # App
 app = ApplicationBuilder().token(TOKEN).build()
@@ -213,7 +204,11 @@ app.add_handler(CallbackQueryHandler(boton_callback))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), guardar_nombre))
 app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, recibir_archivo))
 
+from keep_alive import keep_alive
+
 print("🤖 Bot corriendo... Esperando nombre, archivos y acciones...")
+
+keep_alive()
 app.run_polling()
 
 
