@@ -43,7 +43,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2️⃣ *Envía las fotos o videos* que quieras guardar.\n"
         "3️⃣ Cuando termines, pulsa el botón ✅ *Terminar y enviar* para subir el ZIP.\n\n"
         "♻️ Puedes reiniciar con el botón *Reiniciar*, o cancelar con *Cancelar*.♻️\n\n"
-        "⚠️ *No uses un nombre que contenga la palabra 'años'*, usa `years` o `y` en su lugar."
     )
     await update.message.reply_text(mensaje, parse_mode=ParseMode.MARKDOWN)
 
