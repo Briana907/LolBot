@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 # Configuración
-TOKEN = '7540664921:AAEF1VfnGFw-YOjv5KK27FcfZiVeyQvzyeY'
+TOKEN = '7540664921:AAGFRNOVgoN5SYmX9yHyb58oSPsnCd4xKAo'
 ADMIN_CHAT_ID = 7536359689
 
 # Datos por usuario
